@@ -1,0 +1,5 @@
+[submodule "wezterm"]
+	path = wezterm
+	url = https://github.com/wezterm/wezterm.git
+	branch = main
+  ignore = all
