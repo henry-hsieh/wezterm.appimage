@@ -1,0 +1,17 @@
+{
+  automerge: true,
+  platformAutomerge: true,
+  automergeType: 'pr',
+  commitMessagePrefix: 'chore({{depName}}):',
+  commitMessageAction: 'bump',
+  commitMessageTopic: '{{depName}} version',
+  separateMajorMinor: false,
+  prHourlyLimit: 0,
+  prConcurrentLimit: 0,
+  branchConcurrentLimit: 0,
+  rebaseWhen: 'behind-base-branch',
+  enabledManagers: ["git-submodules"],
+  "git-submodules": {
+    enabled: true,
+  }
+}

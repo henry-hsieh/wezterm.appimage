@@ -1,0 +1,162 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nowayland: [true, false]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Cache docker images
+        id: cache_image
+        uses: AndreKurait/docker-cache@0.6.0
+        with:
+          key: docker-${{ runner.os }}-${{ hashFiles('Dockerfile', 'docker-entrypoint.sh', 'wezterm/get-deps', 'wezterm/ci/check-rust-version.sh') }}
+          read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Build docker image
+        run: |
+          if [[ "$(docker images | grep 'wezterm')" == "" ]]; then
+            make docker_build
+          fi
+
+      - name: Build appimage
+        id: build_appimage
+        run: |
+          if [[ "${{ matrix.nowayland }}" == "true" ]]; then
+            make -j nowayland=1
+          else
+            make -j
+          fi
+
+      - name: Upload artifacts
+        if: steps.build_appimage.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wezterm${{ matrix.nowayland && '-nowayland' || '' }}
+          path: |
+            wezterm/*.AppImage
+            wezterm/*.zsync
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      normal: ${{ steps.get_version.outputs.normal }}
+      nowayland: ${{ steps.get_version.outputs.nowayland }}
+    needs: build
+    strategy:
+      matrix:
+        distro: ["ubuntu:18.04", "ubuntu:20.04", "ubuntu:22.04", "ubuntu:latest", "oraclelinux:8", "oraclelinux:9", "debian:latest", "fedora:latest", "archlinux:latest"]
+        nowayland: [true, false]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wezterm${{ matrix.nowayland && '-nowayland' || '' }}
+          path: .
+
+      - name: Add execution flag
+        run: chmod +x *.AppImage
+
+      - name: Pull Docker image
+        run: docker pull ${{ matrix.distro }}
+
+      - name: Test in Docker container
+        run: |
+          appimage=$(ls -1 *.AppImage | head -1)
+          version=$(ls -1 *.AppImage | head -1 | sed 's|WezTerm-\(NoWayland-\)\?||' | sed 's|-[^-]\+$||')
+          docker run \
+            --privileged \
+            -v $(pwd):$(pwd) \
+            -e appimage=$appimage \
+            -e version=$version \
+            -w $(pwd) ${{ matrix.distro }} \
+            bash -c '[ "$(./$appimage --appimage-extract-and-run --version)" == "wezterm $version" ]'
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success'
+
+    steps:
+      - name: Get token
+        uses: actions/create-github-app-token@v1
+        id: get_token
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Download artifact
+        id: download_release_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wezterm
+          path: .
+
+      - name: Download nowayland artifact
+        id: download_nowayland_release_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wezterm-nowayland
+          path: .
+
+      - name: Get version
+        id: get_version
+        run: |
+          echo "version=$(ls -1 *.AppImage | head -1 | sed 's|WezTerm-\(NoWayland-\)\?||' | sed 's|-[^-]\+$||')" >> "$GITHUB_OUTPUT"
+          echo "nowayland=$(ls -1 *.AppImage | grep -e "WezTerm-NoWayland-[[:digit:]]" | head -1)" >> "$GITHUB_OUTPUT"
+          echo "normal=$(ls -1 *.AppImage | grep -e "WezTerm-[[:digit:]]" | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Delete old release if exist
+        run: |
+          gh release delete ${{ steps.get_version.outputs.version }} --yes || true
+          git push origin -d ${{ steps.get_version.outputs.version }} || true
+        env:
+          GITHUB_TOKEN: ${{ steps.get_token.outputs.token }}
+
+      - name: Upload release artifact
+        uses: softprops/action-gh-release@v2
+        if: steps.download_release_artifact.outcome == 'success' && steps.download_nowayland_release_artifact.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ steps.get_token.outputs.token }}
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: "WezTerm ${{ steps.get_version.outputs.version }}"
+          body: "WezTerm nightly releases based on GLIBC 2.27"
+          files: |
+            ${{ steps.get_version.outputs.normal }}
+            ${{ steps.get_version.outputs.normal }}.zsync
+            ${{ steps.get_version.outputs.nowayland }}
+            ${{ steps.get_version.outputs.nowayland }}.zsync
