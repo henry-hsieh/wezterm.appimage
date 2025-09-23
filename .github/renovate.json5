@@ -1,5 +1,6 @@
 {
   automerge: true,
+  extends: ["config:recommended", ":dependencyDashboard"],
   platformAutomerge: true,
   automergeType: 'pr',
   commitMessagePrefix: 'chore({{depName}}):',
@@ -11,6 +12,7 @@
   branchConcurrentLimit: 0,
   rebaseWhen: 'behind-base-branch',
   enabledManagers: ["git-submodules"],
+  cloneSubmodules: true,
   "git-submodules": {
     enabled: true,
   }
