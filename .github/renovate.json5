@@ -15,5 +15,13 @@
   cloneSubmodules: true,
   "git-submodules": {
     enabled: true,
-  }
+  },
+  packageRules: [
+    {
+      "matchPackageNames": [
+        "*"
+      ],
+      "dependencyDashboardApproval": false
+    },
+  ],
 }
